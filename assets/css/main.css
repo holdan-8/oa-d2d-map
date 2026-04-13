@@ -1,0 +1,49 @@
+/* Leaflet CSS */
+@import 'leaflet/dist/leaflet.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom map styles */
+.leaflet-container {
+  background: #f0f4f8;
+  font-family: inherit;
+}
+
+/* Quartier polygon hover effect */
+.quartier-polygon {
+  transition: fill-opacity 0.2s ease;
+}
+
+/* Status badge colours used in JS – keep in sync with useActionStore */
+.status-not-started { @apply bg-gray-200 text-gray-700; }
+.status-assigned     { @apply bg-yellow-200 text-yellow-800; }
+.status-in-progress  { @apply bg-orange-200 text-orange-800; }
+.status-done         { @apply bg-green-200 text-green-800; }
+
+/* Scrollbar for side panel */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Mobile: full-screen panel overlay */
+@media (max-width: 768px) {
+  .panel-mobile-open {
+    transform: translateY(0) !important;
+  }
+}
