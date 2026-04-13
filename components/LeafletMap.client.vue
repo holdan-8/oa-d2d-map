@@ -119,11 +119,10 @@ function makePopupContent(id: string, name: string): string {
       </div>
       <div style="margin-bottom:6px;font-size:0.78rem;color:#555">Status ändern:</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">${buttons}</div>
-      ${
-        assignedTo
-          ? `<div style="font-size:0.78rem;color:#555">👤 ${assignedTo}</div>`
-          : ''
-      }
+      ${assignedTo
+      ? `<div style="font-size:0.78rem;color:#555">👤 ${assignedTo}</div>`
+      : ''
+    }
       <div style="margin-top:8px">
         <button data-open-panel="${id}" data-name="${encodeURIComponent(name)}"
           style="font-size:0.78rem;color:#2563eb;cursor:pointer;background:none;border:none;padding:0;text-decoration:underline">
@@ -154,12 +153,12 @@ function addGeoJsonLayer(features: QuartierFeature[]): void {
         const name = feature.properties?.name ?? 'Unbekannt'
         if (!id) return
 
-        ;(layer as L.Path).on('mouseover', function () {
-          ;(this as L.Path).setStyle({ fillOpacity: 0.7, weight: 3 })
-        })
-        ;(layer as L.Path).on('mouseout', function () {
-          geoJsonLayer?.resetStyle(this as L.Path)
-        })
+          ; (layer as L.Path).on('mouseover', function () {
+            ; (this as L.Path).setStyle({ fillOpacity: 0.7, weight: 3 })
+          })
+          ; (layer as L.Path).on('mouseout', function () {
+            geoJsonLayer?.resetStyle(this as L.Path)
+          })
 
         layer.on('click', () => {
           // Ensure action exists
@@ -180,11 +179,11 @@ function addGeoJsonLayer(features: QuartierFeature[]): void {
                 const btnName = decodeURIComponent(btn.getAttribute('data-name') ?? '')
                 store.getAction(btnId, btnName)
                 store.setStatus(btnId, status)
-                // Update popup content
-                ;(layer as L.Path).setPopupContent(makePopupContent(btnId, btnName))
+                  // Update popup content
+                  ; (layer as L.Path).setPopupContent(makePopupContent(btnId, btnName))
                 // Update polygon colour
                 geoJsonLayer?.resetStyle(layer as L.Path)
-                ;(layer as L.Path).setStyle(getStyle(feature))
+                  ; (layer as L.Path).setStyle(getStyle(feature))
               })
             })
 
@@ -193,7 +192,7 @@ function addGeoJsonLayer(features: QuartierFeature[]): void {
                 const btnId = btn.getAttribute('data-open-panel')!
                 const btnName = decodeURIComponent(btn.getAttribute('data-name') ?? '')
                 emit('select', btnId, btnName)
-                ;(layer as L.Path).closePopup()
+                  ; (layer as L.Path).closePopup()
               })
             })
           }, 50)
@@ -302,6 +301,11 @@ onMounted(() => {
   if (props.quartiere.length > 0) {
     addGeoJsonLayer(props.quartiere)
   }
+
+  // Fix blank map when container size isn't resolved at mount time
+  nextTick(() => {
+    map?.invalidateSize()
+  })
 })
 
 onUnmounted(() => {
@@ -321,28 +325,21 @@ defineExpose({ switchLayer, activeLayer })
 
     <!-- Base layer toggle (top-right, above Leaflet zoom controls) -->
     <div
-      class="absolute bottom-8 left-2 z-[1000] flex flex-col gap-1 bg-white/90 backdrop-blur-sm rounded-lg shadow-md p-1.5 border border-gray-200"
-    >
-      <button
-        :class="[
-          'px-2 py-1 rounded text-xs font-medium transition-colors',
-          activeLayer === 'swisstopo'
-            ? 'bg-blue-600 text-white'
-            : 'text-gray-600 hover:bg-gray-100'
-        ]"
-        @click="switchLayer('swisstopo')"
-      >
+      class="absolute bottom-8 left-2 z-[1000] flex flex-col gap-1 bg-white/90 backdrop-blur-sm rounded-lg shadow-md p-1.5 border border-gray-200">
+      <button :class="[
+        'px-2 py-1 rounded text-xs font-medium transition-colors',
+        activeLayer === 'swisstopo'
+          ? 'bg-blue-600 text-white'
+          : 'text-gray-600 hover:bg-gray-100'
+      ]" @click="switchLayer('swisstopo')">
         swisstopo
       </button>
-      <button
-        :class="[
-          'px-2 py-1 rounded text-xs font-medium transition-colors',
-          activeLayer === 'osm'
-            ? 'bg-blue-600 text-white'
-            : 'text-gray-600 hover:bg-gray-100'
-        ]"
-        @click="switchLayer('osm')"
-      >
+      <button :class="[
+        'px-2 py-1 rounded text-xs font-medium transition-colors',
+        activeLayer === 'osm'
+          ? 'bg-blue-600 text-white'
+          : 'text-gray-600 hover:bg-gray-100'
+      ]" @click="switchLayer('osm')">
         OSM
       </button>
     </div>
