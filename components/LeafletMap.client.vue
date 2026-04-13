@@ -37,6 +37,7 @@ L.Icon.Default.mergeOptions({
 const props = defineProps<{
   quartiere: QuartierFeature[]
   selectedId: string | null
+  mode: 'planning' | 'action'
 }>()
 
 const emit = defineEmits<{
@@ -50,12 +51,19 @@ const emit = defineEmits<{
 const store = useActionStore()
 
 // ---------------------------------------------------------------------------
+// Action mode state
+// ---------------------------------------------------------------------------
+
+const markingMode = ref(false)
+
+// ---------------------------------------------------------------------------
 // Map setup
 // ---------------------------------------------------------------------------
 
 const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let geoJsonLayer: L.GeoJSON | null = null
+let markersLayer: L.LayerGroup | null = null
 
 // Tile layers
 const SWISSTOPO_URL =
@@ -78,12 +86,16 @@ function getStyle(feature: GeoJSON.Feature | undefined): L.PathOptions {
   const action = store.actions.value[feature.properties.id]
   const status: ActionStatus = action?.status ?? 'not-started'
   const meta = STATUS_META[status]
+
+  // In action mode, dim unassigned quartiere
+  const isDimmed = props.mode === 'action' && status === 'not-started'
+
   return {
-    color: meta.color,
-    fillColor: meta.fillColor,
-    fillOpacity: 0.45,
-    weight: 2,
-    opacity: 0.9
+    color: isDimmed ? '#e5e7eb' : meta.color,
+    fillColor: isDimmed ? '#f3f4f6' : meta.fillColor,
+    fillOpacity: isDimmed ? 0.2 : 0.45,
+    weight: isDimmed ? 1 : 2,
+    opacity: isDimmed ? 0.5 : 0.9
   }
 }
 
@@ -94,7 +106,7 @@ function getStyle(feature: GeoJSON.Feature | undefined): L.PathOptions {
 function makePopupContent(id: string, name: string): string {
   const action = store.actions.value[id]
   const status: ActionStatus = action?.status ?? 'not-started'
-  const assignedTo = action?.assignedTo ?? ''
+  const assignedTo = action?.assignedTo ?? []
   const meta = STATUS_META[status]
 
   const buttons = (Object.keys(STATUS_META) as ActionStatus[])
@@ -119,8 +131,8 @@ function makePopupContent(id: string, name: string): string {
       </div>
       <div style="margin-bottom:6px;font-size:0.78rem;color:#555">Status ändern:</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">${buttons}</div>
-      ${assignedTo
-      ? `<div style="font-size:0.78rem;color:#555">👤 ${assignedTo}</div>`
+      ${assignedTo.length > 0
+      ? `<div style="font-size:0.78rem;color:#555">👤 ${assignedTo.join(', ')}</div>`
       : ''
     }
       <div style="margin-top:8px">
@@ -160,8 +172,24 @@ function addGeoJsonLayer(features: QuartierFeature[]): void {
             geoJsonLayer?.resetStyle(this as L.Path)
           })
 
-        layer.on('click', () => {
-          // Ensure action exists
+        layer.on('click', (e: L.LeafletMouseEvent) => {
+          // In action mode with marking enabled: place a marker
+          if (props.mode === 'action' && markingMode.value) {
+            const action = store.actions.value[id]
+            if (action && action.status !== 'not-started') {
+              store.addMarker(id, e.latlng.lat, e.latlng.lng, '')
+              if (action.status === 'assigned') {
+                store.setStatus(id, 'in-progress')
+              }
+              refreshMarkers()
+              geoJsonLayer?.resetStyle(layer as L.Path)
+                ; (layer as L.Path).setStyle(getStyle(feature))
+            }
+            emit('select', id, name)
+            return
+          }
+
+          // Normal mode: show popup
           store.getAction(id, name)
           const popup = (layer as L.Path)
             .bindPopup(makePopupContent(id, name), { maxWidth: 300 })
@@ -203,6 +231,59 @@ function addGeoJsonLayer(features: QuartierFeature[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Action markers layer
+// ---------------------------------------------------------------------------
+
+function refreshMarkers(): void {
+  if (!map) return
+  if (!markersLayer) {
+    markersLayer = L.layerGroup().addTo(map)
+  } else {
+    markersLayer.clearLayers()
+  }
+
+  if (props.mode !== 'action') return
+
+  for (const action of Object.values(store.actions.value)) {
+    if (!action.markers) continue
+    for (const m of action.markers) {
+      const cm = L.circleMarker([m.lat, m.lng], {
+        radius: 6,
+        fillColor: '#16a34a',
+        color: '#15803d',
+        weight: 1.5,
+        opacity: 1,
+        fillOpacity: 0.8
+      })
+      cm.bindPopup(`
+        <div style="font-size:0.85rem;font-family:system-ui,sans-serif">
+          <strong>${m.label || 'Markierung'}</strong><br>
+          <span style="font-size:0.75rem;color:#999">${new Date(m.timestamp).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}</span><br>
+          <button data-remove-marker="${m.id}" data-quartier-id="${action.id}"
+            style="color:#ef4444;cursor:pointer;font-size:0.75rem;margin-top:4px;background:none;border:none;padding:0;text-decoration:underline">
+            Markierung löschen
+          </button>
+        </div>
+      `, { maxWidth: 200 })
+      cm.on('popupopen', () => {
+        setTimeout(() => {
+          const el = cm.getPopup()?.getElement()
+          el?.querySelectorAll('[data-remove-marker]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const markerId = btn.getAttribute('data-remove-marker')!
+              const quartierId = btn.getAttribute('data-quartier-id')!
+              store.removeMarker(quartierId, markerId)
+              refreshMarkers()
+            })
+          })
+        }, 50)
+      })
+      markersLayer.addLayer(cm)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Refresh layer when store changes (status updates from side panel)
 // ---------------------------------------------------------------------------
 
@@ -211,6 +292,9 @@ watch(
   () => {
     if (geoJsonLayer && props.quartiere.length > 0) {
       geoJsonLayer.setStyle(getStyle)
+    }
+    if (props.mode === 'action') {
+      refreshMarkers()
     }
   },
   { deep: true }
@@ -224,6 +308,16 @@ watch(
   () => props.quartiere,
   (newVal) => {
     if (newVal.length > 0) addGeoJsonLayer(newVal)
+  }
+)
+
+// Refresh markers and styles when mode changes
+watch(
+  () => props.mode,
+  () => {
+    if (geoJsonLayer) geoJsonLayer.setStyle(getStyle)
+    refreshMarkers()
+    markingMode.value = false
   }
 )
 
@@ -267,6 +361,11 @@ function switchLayer(to: 'swisstopo' | 'osm'): void {
     geoJsonLayer.remove()
     geoJsonLayer.addTo(map)
   }
+  // Re-add markers on top
+  if (markersLayer) {
+    markersLayer.remove()
+    markersLayer.addTo(map)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -297,10 +396,12 @@ onMounted(() => {
     maxZoom: 19
   })
 
-  // If quartiere already loaded (unlikely on first render but possible)
   if (props.quartiere.length > 0) {
     addGeoJsonLayer(props.quartiere)
   }
+
+  // Show markers in action mode
+  refreshMarkers()
 
   // Fix blank map when container size isn't resolved at mount time
   nextTick(() => {
@@ -312,6 +413,7 @@ onUnmounted(() => {
   map?.remove()
   map = null
   geoJsonLayer = null
+  markersLayer = null
 })
 
 // Expose toggle for parent use via template ref
@@ -343,5 +445,16 @@ defineExpose({ switchLayer, activeLayer })
         OSM
       </button>
     </div>
+
+    <!-- Marking mode toggle (action mode only) -->
+    <button v-if="mode === 'action'" :class="[
+      'absolute top-4 right-4 z-[1000] flex items-center gap-2 px-4 py-2 rounded-lg shadow-md text-sm font-medium transition-colors border',
+      markingMode
+        ? 'bg-green-600 text-white border-green-700'
+        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+    ]" @click="markingMode = !markingMode">
+      <span v-if="markingMode">✓ Markierungsmodus</span>
+      <span v-else>📍 Markieren</span>
+    </button>
   </div>
 </template>
