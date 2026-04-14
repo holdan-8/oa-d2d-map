@@ -13,9 +13,12 @@
  */
 
 import L from 'leaflet'
+import 'leaflet-draw'
 import type { QuartierFeature } from '~/composables/useBernData'
 import { STATUS_META, useActionStore } from '~/composables/useActionStore'
 import type { ActionStatus } from '~/composables/useActionStore'
+import { usePlanningStore } from '~/composables/usePlanningStore'
+import type { PlannedSection } from '~/composables/usePlanningStore'
 
 // Fix Leaflet default icon paths broken by Vite / Webpack bundling
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -38,10 +41,14 @@ const props = defineProps<{
   quartiere: QuartierFeature[]
   selectedId: string | null
   mode: 'planning' | 'action'
+  drawingEnabled?: boolean
+  selectedSectionId?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'select', id: string, name: string): void
+  (e: 'polygon-drawn', coordinates: [number, number][][]): void
+  (e: 'section-click', id: string): void
 }>()
 
 // ---------------------------------------------------------------------------
@@ -49,6 +56,7 @@ const emit = defineEmits<{
 // ---------------------------------------------------------------------------
 
 const store = useActionStore()
+const planningStore = usePlanningStore()
 
 // ---------------------------------------------------------------------------
 // Action mode state
@@ -64,6 +72,10 @@ const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let geoJsonLayer: L.GeoJSON | null = null
 let markersLayer: L.LayerGroup | null = null
+let plannedSectionsLayer: L.LayerGroup | null = null
+let drawControl: L.Control.Draw | null = null
+let drawnItems: L.FeatureGroup | null = null
+let activeDrawHandler: L.Draw.Polygon | null = null
 
 // Tile layers
 const SWISSTOPO_URL =
@@ -340,6 +352,110 @@ watch(
 )
 
 // ---------------------------------------------------------------------------
+// Planned sections layer (planning mode)
+// ---------------------------------------------------------------------------
+
+function refreshPlannedSections(): void {
+  if (!map) return
+  if (!plannedSectionsLayer) {
+    plannedSectionsLayer = L.layerGroup().addTo(map)
+  } else {
+    plannedSectionsLayer.clearLayers()
+  }
+
+  if (props.mode !== 'planning') return
+
+  for (const section of planningStore.sections.value) {
+    if (!section.coordinates) continue
+
+    const latlngs = section.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number])
+    const isSelected = section.id === props.selectedSectionId
+
+    const polygon = L.polygon(latlngs, {
+      color: isSelected ? '#2563eb' : '#dc2626',
+      fillColor: isSelected ? '#93c5fd' : '#fca5a5',
+      fillOpacity: isSelected ? 0.4 : 0.25,
+      weight: isSelected ? 3 : 2,
+      dashArray: isSelected ? undefined : '6 4',
+    })
+
+    const label = section.areaName || 'Ohne Name'
+    polygon.bindTooltip(label, { permanent: true, direction: 'center', className: 'planned-section-label' })
+
+    polygon.on('click', () => {
+      emit('section-click', section.id)
+    })
+
+    plannedSectionsLayer.addLayer(polygon)
+  }
+}
+
+watch(
+  () => planningStore.sections.value,
+  () => refreshPlannedSections(),
+  { deep: true }
+)
+
+watch(
+  () => props.selectedSectionId,
+  () => refreshPlannedSections()
+)
+
+// ---------------------------------------------------------------------------
+// Drawing mode (planning)
+// ---------------------------------------------------------------------------
+
+function startDrawing(): void {
+  if (!map) return
+  if (!drawnItems) {
+    drawnItems = new L.FeatureGroup()
+    map.addLayer(drawnItems)
+  }
+  // @ts-expect-error: leaflet-draw extends L.Draw
+  activeDrawHandler = new L.Draw.Polygon(map, {
+    shapeOptions: {
+      color: '#dc2626',
+      fillColor: '#fca5a5',
+      fillOpacity: 0.3,
+      weight: 2,
+    },
+  })
+  activeDrawHandler.enable()
+}
+
+function stopDrawing(): void {
+  if (activeDrawHandler) {
+    activeDrawHandler.disable()
+    activeDrawHandler = null
+  }
+}
+
+watch(
+  () => props.drawingEnabled,
+  (enabled) => {
+    if (enabled) {
+      startDrawing()
+    } else {
+      stopDrawing()
+    }
+  }
+)
+
+// Zoom to a specific planned section
+function zoomToSection(sectionId: string): void {
+  const section = planningStore.getSection(sectionId)
+  if (!section?.coordinates || !map) return
+  const latlngs = section.coordinates[0].map(([lng, lat]) => [lat, lng] as L.LatLngTuple)
+  const bounds = L.latLngBounds(latlngs)
+  map.fitBounds(bounds, { padding: [60, 60] })
+}
+
+// Get the map container element for screenshot capture
+function getMapElement(): HTMLElement | null {
+  return mapContainer.value
+}
+
+// ---------------------------------------------------------------------------
 // Base layer toggle
 // ---------------------------------------------------------------------------
 
@@ -403,6 +519,22 @@ onMounted(() => {
   // Show markers in action mode
   refreshMarkers()
 
+  // Show planned sections in planning mode
+  refreshPlannedSections()
+
+  // Listen for draw events
+  map.on(L.Draw.Event.CREATED, (e: L.LeafletEvent) => {
+    const event = e as L.DrawEvents.Created
+    const layer = event.layer as L.Polygon
+    const latlngs = (layer.getLatLngs()[0] as L.LatLng[])
+    const coordinates: [number, number][] = latlngs.map((ll) => [ll.lng, ll.lat])
+    // Close the polygon
+    if (coordinates.length > 0) {
+      coordinates.push(coordinates[0])
+    }
+    emit('polygon-drawn', [coordinates])
+  })
+
   // Fix blank map when container size isn't resolved at mount time
   nextTick(() => {
     map?.invalidateSize()
@@ -410,14 +542,17 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopDrawing()
   map?.remove()
   map = null
   geoJsonLayer = null
   markersLayer = null
+  plannedSectionsLayer = null
+  drawnItems = null
 })
 
 // Expose toggle for parent use via template ref
-defineExpose({ switchLayer, activeLayer })
+defineExpose({ switchLayer, activeLayer, getMapElement, zoomToSection, startDrawing, stopDrawing })
 </script>
 
 <template>

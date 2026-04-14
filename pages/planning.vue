@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { useBernData } from '~/composables/useBernData'
+import { usePlanningStore } from '~/composables/usePlanningStore'
 
 const { loading, error, quartiere, fetchBernData } = useBernData()
+const planningStore = usePlanningStore()
 
 onMounted(() => {
     fetchBernData()
@@ -10,6 +12,10 @@ onMounted(() => {
 const selectedId = ref<string | null>(null)
 const selectedName = ref<string>('')
 const mobilePanelOpen = ref(false)
+const drawingEnabled = ref(false)
+
+const mapRef = ref<InstanceType<typeof LeafletMap> | null>(null)
+const panelRef = ref<InstanceType<typeof PlanningPanel> | null>(null)
 
 function handleSelect(id: string, name: string): void {
     selectedId.value = id
@@ -21,6 +27,25 @@ function handleClose(): void {
     selectedId.value = null
     mobilePanelOpen.value = false
 }
+
+function handleStartDrawing(): void {
+    drawingEnabled.value = true
+}
+
+function handleStopDrawing(): void {
+    drawingEnabled.value = false
+}
+
+function handlePolygonDrawn(coordinates: [number, number][][]): void {
+    drawingEnabled.value = false
+    panelRef.value?.onPolygonDrawn(coordinates)
+}
+
+function handleSectionClick(id: string): void {
+    planningStore.selectSection(id)
+    selectedId.value = id
+    mobilePanelOpen.value = true
+}
 </script>
 
 <template>
@@ -31,8 +56,13 @@ function handleClose(): void {
             <!-- Map area -->
             <div class="relative flex-1 min-h-0">
                 <ClientOnly>
-                    <LeafletMap :quartiere="quartiere" :selected-id="selectedId" mode="planning" class="w-full h-full"
-                        @select="handleSelect" />
+                    <LeafletMap ref="mapRef" :quartiere="quartiere" :selected-id="selectedId" mode="planning"
+                        :drawing-enabled="drawingEnabled"
+                        :selected-section-id="planningStore.selectedSectionId.value"
+                        class="w-full h-full"
+                        @select="handleSelect"
+                        @polygon-drawn="handlePolygonDrawn"
+                        @section-click="handleSectionClick" />
                     <template #fallback>
                         <div class="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500 text-sm">
                             Karte wird geladen…
@@ -40,9 +70,10 @@ function handleClose(): void {
                     </template>
                 </ClientOnly>
 
-                <!-- Legend -->
-                <div class="absolute bottom-20 left-2 z-[1000] hidden md:block">
-                    <StatusLegend />
+                <!-- Drawing mode indicator -->
+                <div v-if="drawingEnabled"
+                    class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-semibold animate-pulse">
+                    ✏️ Zeichnungsmodus aktiv – Klicke auf die Karte
                 </div>
 
                 <!-- Mobile: open panel button -->
@@ -68,8 +99,11 @@ function handleClose(): void {
 
             <!-- Side panel – desktop -->
             <div class="hidden md:flex flex-col w-80 xl:w-96 flex-shrink-0 border-l border-gray-200 shadow-xl">
-                <PlanningPanel :quartiere="quartiere" :selected-id="selectedId" :loading="loading" :error="error"
-                    @select="handleSelect" @close="handleClose" />
+                <PlanningPanel ref="panelRef" :quartiere="quartiere" :selected-id="selectedId" :loading="loading"
+                    :error="error" :drawing-enabled="drawingEnabled" :map-ref="mapRef"
+                    @select="handleSelect" @close="handleClose"
+                    @start-drawing="handleStartDrawing" @stop-drawing="handleStopDrawing"
+                    @section-click="handleSectionClick" />
             </div>
         </div>
 
@@ -81,8 +115,11 @@ function handleClose(): void {
                 <div class="flex justify-center pt-2 pb-1 flex-shrink-0">
                     <div class="w-10 h-1 bg-gray-300 rounded-full" />
                 </div>
-                <PlanningPanel :quartiere="quartiere" :selected-id="selectedId" :loading="loading" :error="error"
-                    class="flex-1 min-h-0" @select="handleSelect" @close="handleClose" />
+                <PlanningPanel ref="panelRef" :quartiere="quartiere" :selected-id="selectedId" :loading="loading"
+                    :error="error" :drawing-enabled="drawingEnabled" :map-ref="mapRef"
+                    class="flex-1 min-h-0" @select="handleSelect" @close="handleClose"
+                    @start-drawing="handleStartDrawing" @stop-drawing="handleStopDrawing"
+                    @section-click="handleSectionClick" />
             </div>
         </Transition>
 
